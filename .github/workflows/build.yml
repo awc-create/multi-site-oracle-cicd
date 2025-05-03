@@ -12,12 +12,15 @@ on:
   repository_dispatch:
 
 env:
-  AWS_REGION: eu-west-2
+  #Vercel
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets[format('{0}_VERCEL_ORG_ID', github.repository)] }}
   VERCEL_PROJECT_ID: ${{ secrets[format('{0}_VERCEL_PROJECT_ID', github.repository)] }}
-  CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets[format('{0}_CLOUDFRONT_DISTRIBUTION_ID', github.repository)] }}
-  S3_BUCKET_NAME: ${{ secrets[format('{0}_S3_BUCKET_NAME', github.repository)] }}
+ 
+  # Oracle VM
+  # ORACLE_VM_IP:    ${{ secrets.ORACLE_VM_IP }}
+  # ORACLE_VM_USER:  ${{ secrets.ORACLE_VM_USER }}
+  # ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
 
 permissions:
   contents: read
@@ -259,158 +262,36 @@ jobs:
         run: vercel deploy --prebuilt --prod --token=${{ env.VERCEL_TOKEN }}
         working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
 
-  deploy-to-s3:
+  deploy-to-oracle: 
     needs: static_pipeline
     if: needs.static_pipeline.outputs.branch == 'main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set Repo Key Env
-        id: set
-        run: |
-          echo "REPO_KEY=${{ needs.static_pipeline.outputs.repository_name }}" >> $GITHUB_ENV
-          echo "REPO_KEY_UPPER=$(echo '${{ needs.static_pipeline.outputs.repository_name }}' | tr '[:lower:]-' '[:upper:]_')" >> $GITHUB_ENV
-
-      - name: Checkout Target Repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ needs.static_pipeline.outputs.repository }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: main
-          path: ${{ needs.static_pipeline.outputs.repository_name }}
-
       - name: Download Static Export Artifact
         uses: actions/download-artifact@v4
         with:
           name: static-export
           path: out
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-west-2
-
-      - name: Set dynamic secrets as environment vars
+      - name: Create SSH Key
+        run: |
+          echo "$ORACLE_VM_SSH_KEY" | base64 --decode > oracle_vm_key
+          chmod 600 oracle_vm_key
         env:
-          REPO_KEY: ${{ env.REPO_KEY_UPPER }}
-          S3_BUCKET: ${{ secrets[format('{0}_S3_BUCKET_NAME', env.REPO_KEY_UPPER)] }}
-          CLOUDFRONT_ID: ${{ secrets[format('{0}_CLOUDFRONT_DISTRIBUTION_ID', env.REPO_KEY_UPPER)] }}
+          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+
+      - name: Upload site to Oracle VM via SCP
         run: |
-          echo "✅ S3_BUCKET_NAME: $S3_BUCKET"
-          echo "✅ CLOUDFRONT_DISTRIBUTION_ID: $CLOUDFRONT_ID"
-          echo "S3_BUCKET=$S3_BUCKET" >> $GITHUB_ENV
-          echo "CLOUDFRONT_ID=$CLOUDFRONT_ID" >> $GITHUB_ENV
+          scp -i oracle_vm_key -r out/* $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
+        env:
+          ORACLE_VM_IP: ${{ secrets.ORACLE_VM_IP }}
+          ORACLE_VM_USER: ${{ secrets.ORACLE_VM_USER }}
 
-      - name: Sync Static Files to S3
+      - name: Restart NGINX
         run: |
-          echo "📦 Syncing static site to S3 bucket: $S3_BUCKET"
-          aws s3 sync out/ s3://$S3_BUCKET --delete
-
-      - name: Invalidate CloudFront Cache
-        if: env.CLOUDFRONT_ID != ''
-        run: |
-          echo "🚀 Invalidating CloudFront cache for: $CLOUDFRONT_ID"
-          aws cloudfront create-invalidation \
-            --distribution-id $CLOUDFRONT_ID \
-            --paths "/*"
-
-
-  # terraform_pipeline:
-  #   needs: static_pipeline
-  #   if: needs.static_pipeline.outputs.branch == 'main'
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #     - name: Checkout Target Repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: ${{ needs.static_pipeline.outputs.repository }}
-  #         token: ${{ secrets.GITHUB_TOKEN }}
-  #         ref: main
-  #         path: ${{ needs.static_pipeline.outputs.repository_name }}
-
-  #     - name: Download Static Export Artifact
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: static-export
-  #         path: ${{ needs.static_pipeline.outputs.repository_name }}/out
-
-  #     - name: Verify out/ folder still exists
-  #       run: |
-  #         echo "📦 Listing all files recursively under '${{ needs.static_pipeline.outputs.repository_name }}':"
-  #         find ${{ needs.static_pipeline.outputs.repository_name }} -type f
-      
-  #         echo ""
-  #         echo "📂 Checking if '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder exists..."
-      
-  #         if [ ! -d "${{ needs.static_pipeline.outputs.repository_name }}/out" ]; then
-  #           echo "❌ Build failed: '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder not found. Make sure 'yarn build' generates a static export."
-  #           exit 1
-  #         else
-  #           echo "✅ '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder exists."
-  #         fi
-  #         working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
-
-  #     - name: Copy Static Build Output
-  #       run: |
-  #         mkdir -p static
-  #         cp -r ${{ needs.static_pipeline.outputs.repository_name }}/out/. static/
-
-  #     - name: Checkout Infra Repo to temp-infra/
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: awc-create/awc-multi-site-cicd
-  #         token: ${{ secrets.GITHUB_TOKEN }}
-  #         path: temp-infra
-
-  #     - name: Move Terraform into Site Repo
-  #       run: |
-  #         mkdir -p ${{ needs.static_pipeline.outputs.repository_name }}/terraform
-  #         cp -r temp-infra/infra/* ${{ needs.static_pipeline.outputs.repository_name }}/terraform/
-
-  #     - name: Move Static Build into Terraform Folder
-  #       run: |
-  #         mkdir -p ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site
-  #         cp -r static/* ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site/
-
-  #     - name: Print Terraform File Structure
-  #       run: |
-  #         echo "==== Terraform Folder Contents ===="
-  #         ls -la ${{ needs.static_pipeline.outputs.repository_name }}/terraform
-  #         echo "==== All .tf Files ===="
-  #         find ${{ needs.static_pipeline.outputs.repository_name }}/terraform -name "*.tf"
-
-  #     - name: Configure AWS Credentials
-  #       uses: aws-actions/configure-aws-credentials@v2
-  #       with:
-  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #         aws-region: ${{ env.AWS_REGION }}
-
-  #     - name: Setup Terraform
-  #       uses: hashicorp/setup-terraform@v3
-
-  #     - name: Terraform Init
-  #       run: terraform init
-  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
-
-  #     - name: Terraform Plan
-  #       run: terraform plan -var="project_name=${{ env.PROJECT_NAME }}" -out=tfplan
-  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
-
-  #     - name: Terraform Apply
-  #       run: terraform apply -auto-approve tfplan
-  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
-
-  #     - name: Sync to S3 Bucket
-  #       run: |
-  #         aws s3 sync ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site s3://${{ env.S3_BUCKET_NAME }} --delete
-
-  #     - name: Invalidate CloudFront Cache
-  #       if: env.CLOUDFRONT_DISTRIBUTION_ID != ''
-  #       run: |
-  #         aws cloudfront create-invalidation \
-  #           --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
-  #           --paths "/*"
+          ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP "sudo systemctl reload nginx"
+        env:
+          ORACLE_VM_IP: ${{ secrets.ORACLE_VM_IP }}
+          ORACLE_VM_USER: ${{ secrets.ORACLE_VM_USER }}
+  
