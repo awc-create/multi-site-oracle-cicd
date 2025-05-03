@@ -274,9 +274,6 @@ jobs:
           name: static-export
           path: out
 
-      - name: Debug local build
-        run: ls -R out
-
       - name: Install SSH key & known_hosts
         run: |
           echo "$ORACLE_VM_SSH_KEY" | base64 --decode > oracle_vm_key
@@ -284,15 +281,18 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $ORACLE_VM_IP >> ~/.ssh/known_hosts
 
-      - name: Test SSH connectivity & remote folder
+      - name: Fix remote permissions
         run: |
           ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
-            "echo 'remote dir:' && ls -ld /var/www/madafmltd.co.uk"
+            "sudo chown -R $ORACLE_VM_USER:$ORACLE_VM_USER /var/www/madafmltd.co.uk"
 
-      - name: Upload site via SCP
+      - name: List local build output
+        run: ls -la out
+
+      - name: Upload site to Oracle VM
         run: |
-          scp -i oracle_vm_key -r out/* \
-            $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
+          TARGET="$ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/"
+          scp -i oracle_vm_key -r out/. "$TARGET"
 
       - name: Reload NGINX
         run: |
