@@ -278,6 +278,11 @@ jobs:
         run: |
           echo "$ORACLE_VM_SSH_KEY" | base64 --decode > oracle_vm_key
           chmod 600 oracle_vm_key
+      
+      - name: Add Oracle VM to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H $ORACLE_VM_IP >> ~/.ssh/known_hosts
 
       - name: Ensure remote web folder exists
         run: |
