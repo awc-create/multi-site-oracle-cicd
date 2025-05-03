@@ -284,10 +284,10 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $ORACLE_VM_IP >> ~/.ssh/known_hosts
 
-      - name: Ensure remote web folder exists
-        run: |
-          ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
-            "sudo mkdir -p /var/www/madafmltd.co.uk && sudo chown $ORACLE_VM_USER:$ORACLE_VM_USER /var/www/madafmltd.co.uk"
+      # - name: Ensure remote web folder exists
+      #   run: |
+      #     ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
+      #       "sudo mkdir -p /var/www/madafmltd.co.uk && sudo chown $ORACLE_VM_USER:$ORACLE_VM_USER /var/www/madafmltd.co.uk"
 
       - name: Upload site to Oracle VM
         run: |
