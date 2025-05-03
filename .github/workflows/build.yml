@@ -18,9 +18,9 @@ env:
   VERCEL_PROJECT_ID: ${{ secrets[format('{0}_VERCEL_PROJECT_ID', github.repository)] }}
  
   # Oracle VM
-  # ORACLE_VM_IP:    ${{ secrets.ORACLE_VM_IP }}
-  # ORACLE_VM_USER:  ${{ secrets.ORACLE_VM_USER }}
-  # ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+  ORACLE_VM_IP:    ${{ secrets.ORACLE_VM_IP }}
+  ORACLE_VM_USER:  ${{ secrets.ORACLE_VM_USER }}
+  ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
 
 permissions:
   contents: read
@@ -262,13 +262,13 @@ jobs:
         run: vercel deploy --prebuilt --prod --token=${{ env.VERCEL_TOKEN }}
         working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
 
-  deploy-to-oracle: 
+  deploy-to-oracle:
     needs: static_pipeline
     if: needs.static_pipeline.outputs.branch == 'main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download Static Export Artifact
+      - name: Download Static Export
         uses: actions/download-artifact@v4
         with:
           name: static-export
@@ -278,25 +278,18 @@ jobs:
         run: |
           echo "$ORACLE_VM_SSH_KEY" | base64 --decode > oracle_vm_key
           chmod 600 oracle_vm_key
-        env:
-          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
 
       - name: Ensure remote web folder exists
         run: |
           ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
             "sudo mkdir -p /var/www/madafmltd.co.uk && sudo chown $ORACLE_VM_USER:$ORACLE_VM_USER /var/www/madafmltd.co.uk"
 
-      - name: Upload site to Oracle VM via SCP
+      - name: Upload site to Oracle VM
         run: |
-          scp -i oracle_vm_key -r out/* $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
-        env:
-          ORACLE_VM_IP: ${{ secrets.ORACLE_VM_IP }}
-          ORACLE_VM_USER: ${{ secrets.ORACLE_VM_USER }}
+          scp -i oracle_vm_key -r out/* \
+            $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
 
-      - name: Restart NGINX
+      - name: Reload NGINX
         run: |
-          ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP "sudo systemctl reload nginx"
-        env:
-          ORACLE_VM_IP: ${{ secrets.ORACLE_VM_IP }}
-          ORACLE_VM_USER: ${{ secrets.ORACLE_VM_USER }}
-  
+          ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
+            "sudo systemctl reload nginx"
