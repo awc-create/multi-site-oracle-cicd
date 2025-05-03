@@ -274,28 +274,25 @@ jobs:
           name: static-export
           path: out
 
-      - name: Create SSH Key
+      - name: Debug local build
+        run: ls -R out
+
+      - name: Install SSH key & known_hosts
         run: |
           echo "$ORACLE_VM_SSH_KEY" | base64 --decode > oracle_vm_key
           chmod 600 oracle_vm_key
-      
-      - name: Add Oracle VM to known_hosts
-        run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H $ORACLE_VM_IP >> ~/.ssh/known_hosts
 
-      - name: Debug Oracle deploy env & connectivity
+      - name: Test SSH connectivity & remote folder
         run: |
-          echo "ORACLE_VM_IP = $ORACLE_VM_IP"
-          echo "ORACLE_VM_USER = $ORACLE_VM_USER"
-          echo "Listing SSH key:"
-          ls -l oracle_vm_key
-          echo "Testing SSH reachability:"
-          ssh -o StrictHostKeyChecking=no -i oracle_vm_key \
-            $ORACLE_VM_USER@$ORACLE_VM_IP "echo 'SSH OK, remote dir:' && ls -ld /var/www/madafmltd.co.uk"
-            
-      - name: Upload site to Oracle VM
-        run: scp -i oracle_vm_key -r out/* $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk
+          ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
+            "echo 'remote dir:' && ls -ld /var/www/madafmltd.co.uk"
+
+      - name: Upload site via SCP
+        run: |
+          scp -i oracle_vm_key -r out/* \
+            $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
 
       - name: Reload NGINX
         run: |
