@@ -284,6 +284,16 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $ORACLE_VM_IP >> ~/.ssh/known_hosts
 
+          - name: Debug Oracle deploy env & connectivity
+          run: |
+            echo "ORACLE_VM_IP = $ORACLE_VM_IP"
+            echo "ORACLE_VM_USER = $ORACLE_VM_USER"
+            echo "Listing SSH key:"
+            ls -l oracle_vm_key
+            echo "Testing SSH reachability:"
+            ssh -o StrictHostKeyChecking=no -i oracle_vm_key \
+              $ORACLE_VM_USER@$ORACLE_VM_IP "echo 'SSH OK, remote dir:' && ls -ld /var/www/madafmltd.co.uk"
+
       # - name: Ensure remote web folder exists
       #   run: |
       #     ssh -i oracle_vm_key $ORACLE_VM_USER@$ORACLE_VM_IP \
