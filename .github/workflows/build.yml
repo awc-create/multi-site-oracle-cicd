@@ -295,7 +295,7 @@ jobs:
             $ORACLE_VM_USER@$ORACLE_VM_IP "echo 'SSH OK, remote dir:' && ls -ld /var/www/madafmltd.co.uk"
             
       - name: Upload site to Oracle VM
-        run: scp -i oracle_vm_key -r out/* $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/
+        run: scp -i oracle_vm_key -r out/* $ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk
 
       - name: Reload NGINX
         run: |
