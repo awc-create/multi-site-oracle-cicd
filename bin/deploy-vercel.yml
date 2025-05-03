@@ -1,0 +1,64 @@
+name: Deploy to Vercel
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        required: true
+        type: string
+      repository_name:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets[format('{0}_VERCEL_ORG_ID', github.repository)] }}
+  VERCEL_PROJECT_ID: ${{ secrets[format('{0}_VERCEL_PROJECT_ID', github.repository)] }}
+
+jobs:
+  deploy-to-vercel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+          path: site-repo
+
+      - name: Debug Vercel Secrets
+        run: |
+          echo "VERCEL_TOKEN is set: $(if [ -z "${{ env.VERCEL_TOKEN }}" ]; then echo 'NO'; else echo 'YES'; fi)"
+          echo "VERCEL_ORG_ID is set: $(if [ -z "${{ env.VERCEL_ORG_ID }}" ]; then echo 'NO'; else echo 'YES'; fi)"
+          echo "VERCEL_PROJECT_ID is set: $(if [ -z "${{ env.VERCEL_PROJECT_ID }}" ]; then echo 'NO'; else echo 'YES'; fi)"
+        shell: bash
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+        working-directory: site-repo
+
+      - name: Pull Vercel Production Environment
+        run: |
+          vercel pull --yes \
+            --environment=production \
+            --token=${{ env.VERCEL_TOKEN }} \
+            --scope=${{ env.VERCEL_ORG_ID }}
+        working-directory: site-repo
+
+      - name: Build Project Artifacts
+        run: vercel build --token=${{ env.VERCEL_TOKEN }}
+        working-directory: site-repo
+
+      - name: Deploy Production Artifacts
+        run: vercel deploy --prebuilt --token=${{ env.VERCEL_TOKEN }}
+        working-directory: site-repo

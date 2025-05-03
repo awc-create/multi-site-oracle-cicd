@@ -1,0 +1,416 @@
+name: Build, Test, and Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+      - 'feat/**'
+      - 'fix/**'
+    paths-ignore:
+      - '**'
+  repository_dispatch:
+
+env:
+  AWS_REGION: eu-west-2
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets[format('{0}_VERCEL_ORG_ID', github.repository)] }}
+  VERCEL_PROJECT_ID: ${{ secrets[format('{0}_VERCEL_PROJECT_ID', github.repository)] }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets[format('{0}_CLOUDFRONT_DISTRIBUTION_ID', github.repository)] }}
+  S3_BUCKET_NAME: ${{ secrets[format('{0}_S3_BUCKET_NAME', github.repository)] }}
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  detect-project-type:
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ github.event.client_payload.repository }}
+      repository_name: ${{ github.event.client_payload.repository_name }}
+      branch: ${{ github.event.client_payload.branch }}
+      project_type: ${{ steps.detect.outputs.PROJECT_TYPE }}
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.event.client_payload.branch }}
+          path: ${{ github.event.client_payload.repository_name }}
+
+      - name: Debug - Verify Repository and Files
+        run: |
+          echo "Current Directory: $(pwd)"
+          ls -la
+        working-directory: ${{ github.event.client_payload.repository_name }}
+
+      
+      - name: Checkout Infra Repo to temp-infra/
+        uses: actions/checkout@v4
+        with:
+          repository: awc-create/awc-multi-site-cicd
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: temp-infra
+  
+      - name: Copy Terraform into Site Repo
+        run: |
+          mkdir -p ${{ github.event.client_payload.repository_name }}/terraform
+          cp -r temp-infra/infra/* ${{ github.event.client_payload.repository_name }}/terraform/
+
+      - name: Print Terraform Files
+        run: |
+            echo "==== PROJECT ROOT ===="
+            ls -la ${{ github.event.client_payload.repository_name }}
+            
+            echo "==== TERRAFORM FILES ===="
+            ls -la ${{ github.event.client_payload.repository_name }}/terraform
+        
+            echo "==== All .tf Files ===="
+            find ${{ github.event.client_payload.repository_name }}/terraform -name "*.tf"        
+  
+      - name: Debug - Verify Final Structure
+        run: |
+          echo "== PROJECT DIR =="
+          ls -la ${{ github.event.client_payload.repository_name }}
+          echo "== TERRAFORM DIR =="
+          ls -la ${{ github.event.client_payload.repository_name }}/terraform
+
+      - name: Verify package.json and Print Full Path
+        run: |
+          ls -la
+          if [ ! -f "$(pwd)/package.json" ]; then
+            echo "package.json NOT found at: $(pwd)/package.json"
+            exit 1
+          else
+            echo "package.json found at: $(pwd)/package.json"
+          fi
+        working-directory: ${{ github.event.client_payload.repository_name }}
+
+      - name: Read `.cicd-config.yml` (if exists)
+        id: detect
+        run: |
+          ls -la
+          PROJECT_TYPE="static"
+          if [ -f ".cicd-config.yml" ]; then
+            PROJECT_TYPE=$(grep "project_type:" .cicd-config.yml | awk '{print $2}')
+          fi
+          if ls *.tf &>/dev/null; then
+            PROJECT_TYPE="terraform"
+          fi
+          echo "::set-output name=PROJECT_TYPE::$PROJECT_TYPE"
+        working-directory: ${{ github.event.client_payload.repository_name }}
+
+  static_pipeline:
+    needs: detect-project-type
+    if: needs.detect-project-type.outputs.project_type == 'static'
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ needs.detect-project-type.outputs.repository }}
+      repository_name: ${{ needs.detect-project-type.outputs.repository_name }}
+      branch: ${{ needs.detect-project-type.outputs.branch }}
+
+    steps:
+          
+      - name: 🔍 Print Secret-Resolved ENV Variables
+        run: |
+          echo "✅ VERCEL_ORG_ID = $VERCEL_ORG_ID"
+          echo "✅ VERCEL_PROJECT_ID = $VERCEL_PROJECT_ID"
+          echo "✅ CLOUDFRONT_DISTRIBUTION_ID = $CLOUDFRONT_DISTRIBUTION_ID"
+          echo "✅ S3_BUCKET_NAME = $S3_BUCKET_NAME"
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.detect-project-type.outputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ needs.detect-project-type.outputs.branch }}
+          path: ${{ needs.detect-project-type.outputs.repository_name }}
+
+      - name: Verify package.json
+        run: |
+          ls -la
+          if [ ! -f "package.json" ]; then
+            echo "package.json not found"
+            exit 1
+          fi
+        working-directory: ${{ needs.detect-project-type.outputs.repository_name }}
+      
+      - name: Use Node.js 22 (match local env)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Install Dependencies
+        run: |
+          ls -la
+          yarn install --immutable
+        working-directory: ${{ needs.detect-project-type.outputs.repository_name }}
+
+      - name: Verify Working Directory and Test Files
+        run: |
+          ls -la
+          find . -type f -name "*.test.tsx" -o -name "*.spec.tsx"
+        working-directory: ${{ needs.detect-project-type.outputs.repository_name }}
+
+      - name: Build the Project
+        run: |
+          ls -la
+          yarn build
+        working-directory: ${{ needs.detect-project-type.outputs.repository_name }}
+
+      - name: Verify out/ folder was created
+        run: |
+          echo "📦 Listing all files recursively under '${{ needs.detect-project-type.outputs.repository_name }}':"
+          find ${{ needs.detect-project-type.outputs.repository_name }} -type f
+      
+          echo ""
+          echo "📂 Checking if '${{ needs.detect-project-type.outputs.repository_name }}/out/' folder exists..."
+      
+          if [ ! -d "${{ needs.detect-project-type.outputs.repository_name }}/out" ]; then
+            echo "❌ Build failed: '${{ needs.detect-project-type.outputs.repository_name }}/out/' folder not found. Make sure 'yarn build' generates a static export."
+            exit 1
+          else
+            echo "✅ '${{ needs.detect-project-type.outputs.repository_name }}/out/' folder exists."
+          fi
+
+      - name: Run Unit Tests
+        run: |
+          ls -la
+          yarn test || echo "No tests found, skipping..."
+        working-directory: ${{ needs.detect-project-type.outputs.repository_name }}
+      
+      - name: Upload Static Export (out/)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-export
+          path: ${{ needs.detect-project-type.outputs.repository_name }}/out
+
+  preview-to-vercel:
+    needs: static_pipeline
+    if: startsWith(needs.static_pipeline.outputs.branch, 'feat/') || startsWith(needs.static_pipeline.outputs.branch, 'fix/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.static_pipeline.outputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ needs.static_pipeline.outputs.branch }}
+          path: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Install Vercel CLI
+        run: yarn global add vercel
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Pull Vercel Preview Environment
+        run: |
+          vercel pull --yes \
+            --environment=preview \
+            --token=${{ env.VERCEL_TOKEN }} \
+            --scope=${{ env.VERCEL_ORG_ID }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Build Project Artifacts
+        run: vercel build --token=${{ env.VERCEL_TOKEN }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Deploy Preview Artifacts
+        run: vercel deploy --prebuilt --token=${{ env.VERCEL_TOKEN }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+  production-to-vercel:
+    needs: static_pipeline
+    if: needs.static_pipeline.outputs.branch == 'dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.static_pipeline.outputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: dev
+          path: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Install Vercel CLI
+        run: yarn global add vercel
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Pull Vercel Production Environment
+        run: |
+          vercel pull --yes \
+            --environment=production \
+            --token=${{ env.VERCEL_TOKEN }} \
+            --scope=${{ env.VERCEL_ORG_ID }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Build Project for Production
+        run: vercel build --prod --token=${{ env.VERCEL_TOKEN }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Deploy Production Artifacts
+        run: vercel deploy --prebuilt --prod --token=${{ env.VERCEL_TOKEN }}
+        working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+  deploy-to-s3:
+    needs: static_pipeline
+    if: needs.static_pipeline.outputs.branch == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set Repo Key Env
+        id: set
+        run: |
+          echo "REPO_KEY=${{ needs.static_pipeline.outputs.repository_name }}" >> $GITHUB_ENV
+          echo "REPO_KEY_UPPER=$(echo '${{ needs.static_pipeline.outputs.repository_name }}' | tr '[:lower:]-' '[:upper:]_')" >> $GITHUB_ENV
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.static_pipeline.outputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+          path: ${{ needs.static_pipeline.outputs.repository_name }}
+
+      - name: Download Static Export Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: static-export
+          path: out
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-2
+
+      - name: Set dynamic secrets as environment vars
+        env:
+          REPO_KEY: ${{ env.REPO_KEY_UPPER }}
+          S3_BUCKET: ${{ secrets[format('{0}_S3_BUCKET_NAME', env.REPO_KEY_UPPER)] }}
+          CLOUDFRONT_ID: ${{ secrets[format('{0}_CLOUDFRONT_DISTRIBUTION_ID', env.REPO_KEY_UPPER)] }}
+        run: |
+          echo "✅ S3_BUCKET_NAME: $S3_BUCKET"
+          echo "✅ CLOUDFRONT_DISTRIBUTION_ID: $CLOUDFRONT_ID"
+          echo "S3_BUCKET=$S3_BUCKET" >> $GITHUB_ENV
+          echo "CLOUDFRONT_ID=$CLOUDFRONT_ID" >> $GITHUB_ENV
+
+      - name: Sync Static Files to S3
+        run: |
+          echo "📦 Syncing static site to S3 bucket: $S3_BUCKET"
+          aws s3 sync out/ s3://$S3_BUCKET --delete
+
+      - name: Invalidate CloudFront Cache
+        if: env.CLOUDFRONT_ID != ''
+        run: |
+          echo "🚀 Invalidating CloudFront cache for: $CLOUDFRONT_ID"
+          aws cloudfront create-invalidation \
+            --distribution-id $CLOUDFRONT_ID \
+            --paths "/*"
+
+
+  # terraform_pipeline:
+  #   needs: static_pipeline
+  #   if: needs.static_pipeline.outputs.branch == 'main'
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - name: Checkout Target Repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: ${{ needs.static_pipeline.outputs.repository }}
+  #         token: ${{ secrets.GITHUB_TOKEN }}
+  #         ref: main
+  #         path: ${{ needs.static_pipeline.outputs.repository_name }}
+
+  #     - name: Download Static Export Artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: static-export
+  #         path: ${{ needs.static_pipeline.outputs.repository_name }}/out
+
+  #     - name: Verify out/ folder still exists
+  #       run: |
+  #         echo "📦 Listing all files recursively under '${{ needs.static_pipeline.outputs.repository_name }}':"
+  #         find ${{ needs.static_pipeline.outputs.repository_name }} -type f
+      
+  #         echo ""
+  #         echo "📂 Checking if '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder exists..."
+      
+  #         if [ ! -d "${{ needs.static_pipeline.outputs.repository_name }}/out" ]; then
+  #           echo "❌ Build failed: '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder not found. Make sure 'yarn build' generates a static export."
+  #           exit 1
+  #         else
+  #           echo "✅ '${{ needs.static_pipeline.outputs.repository_name }}/out/' folder exists."
+  #         fi
+  #         working-directory: ${{ needs.static_pipeline.outputs.repository_name }}
+
+  #     - name: Copy Static Build Output
+  #       run: |
+  #         mkdir -p static
+  #         cp -r ${{ needs.static_pipeline.outputs.repository_name }}/out/. static/
+
+  #     - name: Checkout Infra Repo to temp-infra/
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: awc-create/awc-multi-site-cicd
+  #         token: ${{ secrets.GITHUB_TOKEN }}
+  #         path: temp-infra
+
+  #     - name: Move Terraform into Site Repo
+  #       run: |
+  #         mkdir -p ${{ needs.static_pipeline.outputs.repository_name }}/terraform
+  #         cp -r temp-infra/infra/* ${{ needs.static_pipeline.outputs.repository_name }}/terraform/
+
+  #     - name: Move Static Build into Terraform Folder
+  #       run: |
+  #         mkdir -p ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site
+  #         cp -r static/* ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site/
+
+  #     - name: Print Terraform File Structure
+  #       run: |
+  #         echo "==== Terraform Folder Contents ===="
+  #         ls -la ${{ needs.static_pipeline.outputs.repository_name }}/terraform
+  #         echo "==== All .tf Files ===="
+  #         find ${{ needs.static_pipeline.outputs.repository_name }}/terraform -name "*.tf"
+
+  #     - name: Configure AWS Credentials
+  #       uses: aws-actions/configure-aws-credentials@v2
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ${{ env.AWS_REGION }}
+
+  #     - name: Setup Terraform
+  #       uses: hashicorp/setup-terraform@v3
+
+  #     - name: Terraform Init
+  #       run: terraform init
+  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
+
+  #     - name: Terraform Plan
+  #       run: terraform plan -var="project_name=${{ env.PROJECT_NAME }}" -out=tfplan
+  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
+
+  #     - name: Terraform Apply
+  #       run: terraform apply -auto-approve tfplan
+  #       working-directory: ${{ needs.static_pipeline.outputs.repository_name }}/terraform
+
+  #     - name: Sync to S3 Bucket
+  #       run: |
+  #         aws s3 sync ${{ needs.static_pipeline.outputs.repository_name }}/terraform/site s3://${{ env.S3_BUCKET_NAME }} --delete
+
+  #     - name: Invalidate CloudFront Cache
+  #       if: env.CLOUDFRONT_DISTRIBUTION_ID != ''
+  #       run: |
+  #         aws cloudfront create-invalidation \
+  #           --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+  #           --paths "/*"

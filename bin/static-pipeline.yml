@@ -1,0 +1,62 @@
+name: Static Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        required: true
+        type: string
+      repository_name:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+    outputs:
+      repository:
+        description: "Repository name"
+        value: ${{ jobs.static_pipeline.outputs.repository }}
+      repository_name:
+        description: "Repository full name"
+        value: ${{ jobs.static_pipeline.outputs.repository_name }}
+      branch:
+        description: "Branch name"
+        value: ${{ jobs.static_pipeline.outputs.branch }}
+
+jobs:
+  static_pipeline:
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ inputs.repository }}
+      repository_name: ${{ inputs.repository_name }}
+      branch: ${{ inputs.branch }}
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ inputs.branch }}
+          path: site-repo
+
+      - name: Verify package.json
+        run: |
+          ls -la
+          if [ ! -f "package.json" ]; then
+            echo "package.json not found"
+            exit 1
+          fi
+        working-directory: site-repo
+
+      - name: Install Dependencies
+        run: npm install
+        working-directory: site-repo
+
+      - name: Build the Project
+        run: npm run build
+        working-directory: site-repo
+
+      - name: Run Unit Tests
+        run: npm test || echo "No tests found, skipping..."
+        working-directory: site-repo

@@ -1,0 +1,35 @@
+{
+  "name": "awc-multi-site-cicd",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "jest"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+  "jest": "^29.0.0",
+  "ts-jest": "^29.0.0",
+  "@testing-library/react": "^13.4.0",
+  "@types/jest": "^29.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awc-create/awc-multi-site-cicd.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/awc-create/awc-multi-site-cicd/issues"
+  },
+  "homepage": "https://github.com/awc-create/awc-multi-site-cicd#readme",
+  "description": ""
+}

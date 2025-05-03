@@ -1,0 +1,40 @@
+name: Build, Test, and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+  repository_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets[format('{0}_VERCEL_ORG_ID', github.repository)] }}
+  VERCEL_PROJECT_ID: ${{ secrets[format('{0}_VERCEL_PROJECT_ID', github.repository)] }}
+
+jobs:
+  detect-project-type:
+    uses: ./.github/workflows/detect-project.yml
+
+  static_pipeline:
+    needs: detect-project-type
+    uses: ./.github/workflows/static-pipeline.yml
+    with:
+      repository: ${{ needs.detect-project-type.outputs.repository }}
+      repository_name: ${{ needs.detect-project-type.outputs.repository_name }}
+      branch: ${{ needs.detect-project-type.outputs.branch }}
+
+  deploy-to-vercel:
+    needs: static_pipeline
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy-vercel.yml
+    with:
+      repository: ${{ needs.static_pipeline.outputs.repository }}
+      repository_name: ${{ needs.static_pipeline.outputs.repository_name }}
+      branch: ${{ needs.static_pipeline.outputs.branch }}

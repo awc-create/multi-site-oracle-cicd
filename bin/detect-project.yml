@@ -1,0 +1,73 @@
+name: Detect Project Type
+
+on:
+  workflow_call:
+    outputs:
+      repository:
+        description: "Repository name"
+        value: ${{ jobs.detect-project-type.outputs.repository }}
+      repository_name:
+        description: "Repository full name"
+        value: ${{ jobs.detect-project-type.outputs.repository_name }}
+      branch:
+        description: "Branch name"
+        value: ${{ jobs.detect-project-type.outputs.branch }}
+      project_type:
+        description: "Project type"
+        value: ${{ jobs.detect-project-type.outputs.project_type }}
+
+jobs:
+  detect-project-type:
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ steps.set.outputs.repository }}
+      repository_name: ${{ steps.set.outputs.repository_name }}
+      branch: ${{ steps.set.outputs.branch }}
+      project_type: ${{ steps.detect.outputs.PROJECT_TYPE }}
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.event.client_payload.branch }}
+          path: site-repo
+
+      - name: Debug - Verify Repository and Files
+        run: |
+          echo "Current Directory: $(pwd)"
+          ls -la
+        working-directory: site-repo
+
+      - name: Verify package.json and Print Full Path
+        run: |
+          ls -la
+          if [ ! -f "$(pwd)/package.json" ]; then
+            echo "package.json NOT found at: $(pwd)/package.json"
+            exit 1
+          else
+            echo "package.json found at: $(pwd)/package.json"
+          fi
+        working-directory: site-repo
+
+      - name: Read `.cicd-config.yml` (if exists)
+        id: detect
+        run: |
+          PROJECT_TYPE="static"
+          if [ -f ".cicd-config.yml" ]; then
+            PROJECT_TYPE=$(grep "project_type:" .cicd-config.yml | awk '{print $2}')
+          fi
+          if ls *.tf &>/dev/null; then
+            PROJECT_TYPE="terraform"
+          fi
+          echo "::set-output name=PROJECT_TYPE::$PROJECT_TYPE"
+        working-directory: site-repo
+
+      - name: Set Outputs
+        id: set
+        run: |
+          echo "::set-output name=repository::${{ github.event.client_payload.repository }}"
+          echo "::set-output name=repository_name::${{ github.event.client_payload.repository_name }}"
+          echo "::set-output name=branch::${{ github.event.client_payload.branch }}"
