@@ -291,7 +291,7 @@ jobs:
 
       - name: Upload site to Oracle VM
         run: |
-          TARGET="$ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk/"
+          TARGET="$ORACLE_VM_USER@$ORACLE_VM_IP:/var/www/madafmltd.co.uk"
           scp -i oracle_vm_key -r out/. "$TARGET"
 
       - name: Reload NGINX
